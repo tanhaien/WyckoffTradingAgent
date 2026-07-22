@@ -15,8 +15,7 @@ from numpy.typing import NDArray
 from core._price_math import DATE_SORTED_ATTR
 from core.a_share_entry_research import (
     AShareEntryResearchPolicy,
-    calibrated_confirmation_score,
-    confirmed_signal_allowed,
+    confirmed_item_allowed,
     market_context_allows_entry,
 )
 from core.ai_candidate_allocation import AiCandidateAllocationConfig
@@ -154,6 +153,7 @@ class _ConfirmedSignals:
     score_map: dict[str, float]
     track_map: dict[str, str]
     trigger_map: dict[str, str]
+    observed_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -518,7 +518,13 @@ def _select_ranked_codes(
     sector_map: dict[str, str],
     config: BacktestReplayConfig,
 ) -> tuple[_RankedSelection | None, int]:
-    confirmed = _confirmed_signals(ctx, pending_pool, sector_map, config.a_share_entry_research)
+    confirmed = _confirmed_signals(
+        ctx,
+        pending_pool,
+        sector_map,
+        config.a_share_entry_research,
+        selection_limit=config.top_n,
+    )
     selected_codes, score_map, track_map = select_ai_input_codes(
         result=ctx.result,
         day_df_map=ctx.day_df_map,
@@ -534,7 +540,7 @@ def _select_ranked_codes(
     _merge_confirmed_metadata(score_map, track_map, confirmed)
     ranked_codes = _apply_selection_guards(ranked_codes, ctx, config)
     if not ranked_codes:
-        return None, len(confirmed.codes)
+        return None, confirmed.observed_count
     return (
         _RankedSelection(
             ranked_codes,
@@ -543,7 +549,7 @@ def _select_ranked_codes(
             _name_score_map(ctx.result, confirmed, prefer_confirmed=config.pending_mode == "only"),
             frozenset(confirmed.codes),
         ),
-        len(confirmed.codes),
+        confirmed.observed_count,
     )
 
 
@@ -552,6 +558,8 @@ def _confirmed_signals(
     pending_pool: PendingPool | None,
     sector_map: dict[str, str],
     policy: AShareEntryResearchPolicy | None = None,
+    *,
+    selection_limit: int = 0,
 ) -> _ConfirmedSignals:
     if pending_pool is None:
         return _ConfirmedSignals([], {}, {}, {})
@@ -561,28 +569,46 @@ def _confirmed_signals(
         signal_date_str, ctx.result.triggers, ctx.day_df_map, ctx.regime, ctx.name_map, sector_map, ctx.day_cfg
     )
     confirmed_items = pending_pool.tick(ctx.day_df_map, signal_date_str)
+    ranked_items = _rank_confirmed_items(confirmed_items)
+    observed_count = len(ranked_items)
     if not market_context_allows_entry(research, regime=ctx.regime, breadth=ctx.breadth):
-        return _ConfirmedSignals([], {}, {}, {})
+        return _ConfirmedSignals([], {}, {}, {}, observed_count)
+    if research.preserve_rank_slots_before_filtering and selection_limit > 0:
+        ranked_items = ranked_items[:selection_limit]
     codes: list[str] = []
     score_map: dict[str, float] = {}
     track_map: dict[str, str] = {}
     trigger_map: dict[str, str] = {}
-    for item in confirmed_items:
+    for item in ranked_items:
         signal_type = str(item.get("signal_type", "confirmed"))
-        if not confirmed_signal_allowed(research, signal_type):
+        code = str(item.get("code", "")).strip()
+        if not code or not confirmed_item_allowed(
+            research,
+            item,
+            regime=ctx.regime,
+            history=ctx.day_df_map.get(code),
+        ):
             continue
+        codes.append(code)
+        score_map[code] = candidate_score_value(item.get("score"))
+        track_map[code] = candidate_entry_track(item, fields=("track", "signal_type"))
+        trigger_map[code] = signal_type
+    return _ConfirmedSignals(codes, score_map, track_map, trigger_map, observed_count)
+
+
+def _rank_confirmed_items(items: list[dict]) -> list[dict]:
+    best_by_code: dict[str, dict] = {}
+    for item in items:
         code = str(item.get("code", "")).strip()
         if not code:
             continue
-        score = calibrated_confirmation_score(research, signal_type, item.get("score"))
-        if code not in score_map:
-            codes.append(code)
-        if code not in score_map or score > score_map[code]:
-            score_map[code] = score
-            track_map[code] = candidate_entry_track(item, fields=("track", "signal_type"))
-            trigger_map[code] = signal_type
-    codes.sort(key=lambda code: (-candidate_score_value(score_map.get(code)), code))
-    return _ConfirmedSignals(codes, score_map, track_map, trigger_map)
+        current = best_by_code.get(code)
+        if current is None or candidate_score_value(item.get("score")) > candidate_score_value(current.get("score")):
+            best_by_code[code] = item
+    return sorted(
+        best_by_code.values(),
+        key=lambda item: (-candidate_score_value(item.get("score")), str(item.get("code", ""))),
+    )
 
 
 def _merge_confirmed_metadata(

@@ -40,19 +40,29 @@ def _write_summary(
 def test_strategy_comparison_builds_relative_and_walk_forward_results(tmp_path: Path) -> None:
     periods = ["bull_2020", "bear_2022", "recent_6m"]
     for period_index, period in enumerate(periods):
-        for variant_index, variant in enumerate(("A", "F", "G", "H", "I")):
+        for variant_index, variant in enumerate(("A", "F", "G", "H", "J", "K")):
             _write_summary(tmp_path, period, variant, 2.0 + variant_index + period_index, -4.0)
 
     rows = load_strategy_comparison_rows(tmp_path)
     report = build_strategy_comparison(rows)
 
-    assert len(rows) == 15
+    assert len(rows) == 18
     assert report["status"] == "ready"
-    assert report["evaluations"]["I"]["status"] == "pass"
-    assert report["evaluations"]["I"]["exposure_periods"] == 3
-    assert report["evaluations"]["I"]["changed_trades"] == 6
+    assert report["evaluations"]["K"]["status"] == "pass"
+    assert report["evaluations"]["K"]["exposure_periods"] == 3
+    assert report["evaluations"]["K"]["changed_trades"] == 6
     assert len(report["walk_forward"]["windows"]) == 2
     assert "相对 A 组结论" in render_strategy_comparison(report)
+
+
+def test_strategy_comparison_uses_executed_cash_trade_average(tmp_path: Path) -> None:
+    _write_summary(tmp_path, "recent_6m", "A", 2.0, -4.0)
+    target = tmp_path / "backtest-strategy-recent_6m-A" / "cash_trades_fixture.csv"
+    target.write_text("ret_pct\n-5\n3\n", encoding="utf-8")
+
+    row = load_strategy_comparison_rows(tmp_path)[0]
+
+    assert row.avg_return == -1.0
 
 
 def test_strategy_comparison_accepts_github_artifact_run_suffix(tmp_path: Path) -> None:

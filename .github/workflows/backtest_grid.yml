@@ -353,7 +353,7 @@ jobs:
           if-no-files-found: warn
 
   # ────────────────────────────────────────────────
-  # Phase 2b: 固定退出参数，仅切换 A/B/C/D/E 策略能力做消融对比
+  # Phase 2b: 固定退出参数，仅切换研究入场策略做消融对比
   # ────────────────────────────────────────────────
   strategy_compare:
     name: Strategy ${{ matrix.period_key }} / ${{ matrix.variant }}
@@ -366,8 +366,8 @@ jobs:
       max-parallel: 20
       matrix:
         period_key: [recent_2m, recent_6m, bull_2020, bear_2022]
-        # 经典 B-E 已完成一次消融且未通过，默认算力转向 A 股实证入场实验。
-        variant: [A, F, G, H, I]
+        # I 的人工先验校准已失败；F/G 改为不递补纯消融，J/K 检验 Spring 与水温分层。
+        variant: [A, F, G, H, J, K]
     steps:
       - name: Resolve period dates
         id: period

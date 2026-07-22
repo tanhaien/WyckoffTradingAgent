@@ -11,13 +11,14 @@ VARIANT_LABELS = {
     "C": "基线 + regime 触发阈值分层",
     "D": "基线 + Creek/LPS + 跨信号时序加分",
     "E": "B+C+D 全部开启",
-    "F": "A股实证：剔除 EVR 确认信号",
-    "G": "A股实证：剔除 EVR 与 SOS 确认信号",
+    "F": "A股实证：纯消融 EVR，不递补次级候选",
+    "G": "A股实证：纯消融 EVR/SOS，不递补次级候选",
     "H": "A股实证：NEUTRAL 入场需广度确认",
-    "I": "A股实证：按历史命中先验重排确认信号",
+    "J": "A股实证：Spring 强价格确认，不递补次级候选",
+    "K": "A股实证：信号族按市场水温分层，不递补次级候选",
 }
 
-DEFAULT_COMPARISON_VARIANTS = ("A", "F", "G", "H", "I")
+DEFAULT_COMPARISON_VARIANTS = ("A", "F", "G", "H", "J", "K")
 
 _ALL_SWITCHES = {
     "dist_upthrust_enabled": False,
@@ -40,14 +41,32 @@ _VARIANT_SWITCHES = {
     "F": {},
     "G": {},
     "H": {},
-    "I": {},
+    "J": {},
+    "K": {},
 }
 
 _ENTRY_POLICIES = {
-    "F": AShareEntryResearchPolicy(blocked_confirmed_signals=("evr",)),
-    "G": AShareEntryResearchPolicy(blocked_confirmed_signals=("evr", "sos")),
+    "F": AShareEntryResearchPolicy(
+        blocked_confirmed_signals=("evr",),
+        preserve_rank_slots_before_filtering=True,
+    ),
+    "G": AShareEntryResearchPolicy(
+        blocked_confirmed_signals=("evr", "sos"),
+        preserve_rank_slots_before_filtering=True,
+    ),
     "H": AShareEntryResearchPolicy(require_neutral_breadth_confirmation=True),
-    "I": AShareEntryResearchPolicy(calibrate_confirmed_score=True),
+    "J": AShareEntryResearchPolicy(
+        preserve_rank_slots_before_filtering=True,
+        require_strong_spring_confirmation=True,
+    ),
+    "K": AShareEntryResearchPolicy(
+        blocked_confirmed_signals_by_regime=(
+            ("NEUTRAL", ("spring", "evr")),
+            ("PANIC_REPAIR_CONFIRMED", ("spring", "sos")),
+            ("PANIC_REPAIR_INTRADAY", ("spring", "sos")),
+        ),
+        preserve_rank_slots_before_filtering=True,
+    ),
 }
 
 
@@ -55,7 +74,7 @@ def normalize_strategy_variant(raw: str) -> str:
     value = str(raw or "live").strip()
     normalized = value.upper() if value.lower() != "live" else "live"
     if normalized not in VARIANT_LABELS:
-        raise ValueError("strategy_variant 必须是 live / A / B / C / D / E / F / G / H / I")
+        raise ValueError("strategy_variant 必须是 live / A / B / C / D / E / F / G / H / J / K")
     return normalized
 
 
