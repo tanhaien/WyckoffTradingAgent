@@ -15,7 +15,7 @@ from typing import Any
 from workflows.backtest_strategy_variants import DEFAULT_COMPARISON_VARIANTS, VARIANT_LABELS
 
 _DIR_PATTERN = re.compile(
-    r"backtest-strategy-(?P<period>recent_2m|recent_6m|bull_2020|bear_2022|custom)-(?P<variant>[A-I])"
+    r"backtest-strategy-(?P<period>recent_2m|recent_6m|bull_2020|bear_2022|custom)-(?P<variant>[A-HJK])"
     r"(?:-\d+)?$"
 )
 
@@ -54,7 +54,7 @@ def load_strategy_comparison_rows(artifacts_dir: Path) -> list[StrategyCompariso
                 cash_drawdown=_cash_metric(content, "现金最大回撤"),
                 cash_trades=_cash_int_metric(content, "成交笔数"),
                 win_rate=_cash_metric(content, "胜率"),
-                avg_return=_metric(content, "平均收益"),
+                avg_return=_cash_trade_average(path.parent),
                 sharpe=_metric(content, r"夏普比(?:\s*\(Sharpe Ratio\))?"),
                 trade_keys=_trade_keys(path.parent),
             )
@@ -74,19 +74,20 @@ def build_strategy_comparison(rows: list[StrategyComparisonRow]) -> dict[str, An
         "rows": [_row_payload(row) for row in sorted(rows, key=lambda row: (row.period, row.variant))],
         "evaluations": evaluations,
         "walk_forward": _walk_forward(rows),
-        "scope": "默认比较 A/F/G/H/I，只改变 confirmed-only 入场筛选或排序；持仓期统一使用固定退出。",
+        "scope": "默认比较 A/F/G/H/J/K，只改变 confirmed-only 入场筛选；持仓期统一使用固定退出。",
         "decision_rule": "至少两个周期真实改变入选交易、胜出周期过半、平均收益增量为正，且最大回撤恶化不超过2个百分点。",
     }
 
 
 def render_strategy_comparison(report: dict[str, Any]) -> str:
     lines = [
-        "# 策略 A/F/G/H/I A股实证消融对比",
+        "# 策略 A/F/G/H/J/K A股实证消融对比",
         "",
         "固定同一数据快照、确认口径、组合与退出参数，仅切换 confirmed-only 入场能力。A 为基线。",
-        "F/G 验证弱信号剔除，H 验证 NEUTRAL 广度闸门，I 验证跨触发器分数校准。",
+        "F/G 先锁定基线排名槽位再剔除信号，避免次级候选递补污染；H 验证 NEUTRAL 广度闸门。",
+        "J 验证 Spring 强价格确认，K 验证信号族按市场水温分层；全部为研究策略。",
         "",
-        "| 周期 | 组别 | 现金收益 | 现金回撤 | 成交 | 胜率 | 平均单笔 | 夏普 |",
+        "| 周期 | 组别 | 现金收益 | 现金回撤 | 成交 | 胜率 | 现金单笔 | 夏普 |",
         "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     lines.extend(_row_line(row) for row in report.get("rows", []))
@@ -219,6 +220,20 @@ def _trade_keys(directory: Path) -> tuple[str, ...]:
     with paths[0].open(encoding="utf-8-sig", newline="") as handle:
         rows = csv.DictReader(handle)
         return tuple(sorted(f"{row.get('signal_date', '')}:{row.get('code', '')}" for row in rows))
+
+
+def _cash_trade_average(directory: Path) -> float | None:
+    paths = sorted(directory.glob("cash_trades_*.csv"))
+    if not paths:
+        return None
+    values: list[float] = []
+    with paths[0].open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            try:
+                values.append(float(row.get("ret_pct", "")))
+            except (TypeError, ValueError):
+                continue
+    return mean(values) if values else None
 
 
 def _trade_delta(base: StrategyComparisonRow, candidate: StrategyComparisonRow) -> int:

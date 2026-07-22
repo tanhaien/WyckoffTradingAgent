@@ -347,7 +347,7 @@ def test_confirmed_signals_rank_codes_by_best_score() -> None:
     assert confirmed.codes == ["000001", "000003", "000002"]
 
 
-def test_confirmed_signals_apply_a_share_research_filter_and_score() -> None:
+def test_confirmed_signals_apply_a_share_research_filter_without_reranking() -> None:
     class Pending:
         def write(self, *_args, **_kwargs):
             return None
@@ -369,12 +369,45 @@ def test_confirmed_signals_apply_a_share_research_filter_and_score() -> None:
         result=_result(),
         regime="CAUTION",
     )
-    policy = AShareEntryResearchPolicy(blocked_confirmed_signals=("evr",), calibrate_confirmed_score=True)
+    policy = AShareEntryResearchPolicy(blocked_confirmed_signals=("evr",))
 
     confirmed = replay_mod._confirmed_signals(ctx, Pending(), {}, policy)
 
-    assert confirmed.codes == ["TREND", "SOS"]
+    assert confirmed.codes == ["SOS", "TREND"]
     assert "EVR" not in confirmed.score_map
+    assert confirmed.observed_count == 3
+
+
+def test_confirmed_signals_pure_ablation_does_not_backfill_blocked_rank_slot() -> None:
+    class Pending:
+        def write(self, *_args, **_kwargs):
+            return None
+
+        def tick(self, *_args, **_kwargs):
+            return [
+                {"code": "EVR", "score": 100.0, "signal_type": "evr"},
+                {"code": "SPRING", "score": 90.0, "signal_type": "spring"},
+            ]
+
+    ctx = replay_mod._DayContext(
+        idx=0,
+        signal_date=date(2026, 1, 1),
+        entry_target_date=date(2026, 1, 2),
+        day_df_map={},
+        name_map={},
+        day_cfg=FunnelConfig(trading_days=3),
+        result=_result(),
+        regime="NEUTRAL",
+    )
+    policy = AShareEntryResearchPolicy(
+        blocked_confirmed_signals=("evr",),
+        preserve_rank_slots_before_filtering=True,
+    )
+
+    confirmed = replay_mod._confirmed_signals(ctx, Pending(), {}, policy, selection_limit=1)
+
+    assert confirmed.codes == []
+    assert confirmed.observed_count == 2
 
 
 def test_confirmed_signals_require_breadth_for_neutral_research_variant() -> None:
@@ -410,6 +443,7 @@ def test_confirmed_signals_require_breadth_for_neutral_research_variant() -> Non
     )
 
     assert confirmed.codes == []
+    assert confirmed.observed_count == 1
     assert pending.written is True
     assert pending.ticked is True
 
