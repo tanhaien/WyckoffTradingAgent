@@ -14,6 +14,8 @@ class AShareEntryResearchPolicy:
     blocked_confirmed_signals: tuple[str, ...] = ()
     blocked_confirmed_signals_by_regime: tuple[tuple[str, tuple[str, ...]], ...] = ()
     entry_weight_multipliers: tuple[tuple[str, str, float], ...] = ()
+    max_hold_days_by_regime_signal: tuple[tuple[str, str, int], ...] = ()
+    score_adjustments_by_regime_signal: tuple[tuple[str, str, float], ...] = ()
     preserve_rank_slots_before_filtering: bool = False
     balance_confirmed_signal_families: bool = False
     require_neutral_breadth_confirmation: bool = False
@@ -62,11 +64,12 @@ def rank_confirmed_items(
     policy: AShareEntryResearchPolicy,
     *,
     rotation_key: int = 0,
+    regime: object = "",
 ) -> list[dict[str, Any]]:
     if not policy.balance_confirmed_signal_families:
-        return _rank_best_by_code(items)
+        return _rank_best_by_code(items, policy, regime)
     grouped: dict[str, list[dict[str, Any]]] = {}
-    for item in _rank_best_by_code_and_signal(items):
+    for item in _rank_best_by_code_and_signal(items, policy, regime):
         grouped.setdefault(normalized_signal_type(item.get("signal_type")), []).append(item)
     families = [family for family in _BALANCED_SIGNAL_FAMILY_ORDER if family in grouped]
     families.extend(sorted(set(grouped) - set(families)))
@@ -98,6 +101,38 @@ def entry_weight_multiplier(
         if regime_key == str(configured_regime).strip().upper() and signal == normalized_signal_type(configured_signal):
             return min(max(float(multiplier), 0.0), 1.0)
     return 1.0
+
+
+def research_max_hold_days(
+    policy: AShareEntryResearchPolicy,
+    signal_type: object,
+    regime: object,
+    default_days: int,
+) -> int:
+    default = max(int(default_days), 1)
+    signal = normalized_signal_type(signal_type)
+    regime_key = str(regime or "").strip().upper()
+    for configured_regime, configured_signal, hold_days in policy.max_hold_days_by_regime_signal:
+        if regime_key == str(configured_regime).strip().upper() and signal == normalized_signal_type(configured_signal):
+            return min(max(int(hold_days), 1), default)
+    return default
+
+
+def adjusted_entry_score(
+    policy: AShareEntryResearchPolicy,
+    signal_type: object,
+    regime: object,
+    raw_score: object,
+) -> float:
+    score = _number(raw_score)
+    score = score if math.isfinite(score) else 0.0
+    signal = normalized_signal_type(signal_type)
+    regime_key = str(regime or "").strip().upper()
+    for configured_regime, configured_signal, adjustment in policy.score_adjustments_by_regime_signal:
+        if regime_key == str(configured_regime).strip().upper() and signal == normalized_signal_type(configured_signal):
+            value = _number(adjustment)
+            return score + (value if math.isfinite(value) else 0.0)
+    return score
 
 
 def market_context_allows_entry(
@@ -161,30 +196,37 @@ def _strong_spring_confirmation(
     )
 
 
-def _rank_best_by_code(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _rank_best_by_code(
+    items: list[dict[str, Any]],
+    policy: AShareEntryResearchPolicy,
+    regime: object,
+) -> list[dict[str, Any]]:
     best: dict[str, dict[str, Any]] = {}
     for item in items:
         code = str(item.get("code", "")).strip()
         current = best.get(code)
-        if code and (current is None or _score(item) > _score(current)):
+        if code and (current is None or _score(item, policy, regime) > _score(current, policy, regime)):
             best[code] = item
-    return sorted(best.values(), key=lambda item: (-_score(item), str(item.get("code", ""))))
+    return sorted(best.values(), key=lambda item: (-_score(item, policy, regime), str(item.get("code", ""))))
 
 
-def _rank_best_by_code_and_signal(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _rank_best_by_code_and_signal(
+    items: list[dict[str, Any]],
+    policy: AShareEntryResearchPolicy,
+    regime: object,
+) -> list[dict[str, Any]]:
     best: dict[tuple[str, str], dict[str, Any]] = {}
     for item in items:
         code = str(item.get("code", "")).strip()
         key = (code, normalized_signal_type(item.get("signal_type")))
         current = best.get(key)
-        if code and (current is None or _score(item) > _score(current)):
+        if code and (current is None or _score(item, policy, regime) > _score(current, policy, regime)):
             best[key] = item
-    return sorted(best.values(), key=lambda item: (-_score(item), str(item.get("code", ""))))
+    return sorted(best.values(), key=lambda item: (-_score(item, policy, regime), str(item.get("code", ""))))
 
 
-def _score(item: dict[str, Any]) -> float:
-    value = _number(item.get("score"))
-    return value if math.isfinite(value) else 0.0
+def _score(item: dict[str, Any], policy: AShareEntryResearchPolicy, regime: object) -> float:
+    return adjusted_entry_score(policy, item.get("signal_type"), regime, item.get("score"))
 
 
 def _number(raw: object) -> float:

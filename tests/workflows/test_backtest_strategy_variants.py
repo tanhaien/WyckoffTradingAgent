@@ -18,7 +18,7 @@ def test_strategy_variants_isolate_each_research_switch() -> None:
         "signal_sequence_bonus_enabled": True,
     }
     assert all(strategy_variant_overrides("E").values())
-    assert DEFAULT_COMPARISON_VARIANTS == ("A", "L", "M", "N")
+    assert DEFAULT_COMPARISON_VARIANTS == ("A", "M", "O", "P", "Q", "R")
     assert strategy_variant_overrides("F") == baseline
     assert strategy_variant_entry_policy("F").blocked_confirmed_signals == ("evr",)
     assert strategy_variant_entry_policy("F").preserve_rank_slots_before_filtering is True
@@ -33,9 +33,25 @@ def test_strategy_variants_isolate_each_research_switch() -> None:
     assert strategy_variant_entry_policy("M").entry_weight_multipliers[0] == ("NEUTRAL", "spring", 0.5)
     assert strategy_variant_entry_policy("N").balance_confirmed_signal_families is True
     assert strategy_variant_entry_policy("N").entry_weight_multipliers
+    assert strategy_variant_entry_policy("O").blocked_confirmed_signals_by_regime == (("NEUTRAL", ("spring",)),)
+    assert strategy_variant_entry_policy("P").max_hold_days_by_regime_signal[0] == (
+        "CAUTION",
+        "spring",
+        10,
+    )
+    assert strategy_variant_entry_policy("Q").score_adjustments_by_regime_signal[0] == (
+        "NEUTRAL",
+        "spring",
+        -2.0,
+    )
+    assert strategy_variant_entry_policy("R").preserve_rank_slots_before_filtering is True
+    assert strategy_variant_entry_policy("R").max_hold_days_by_regime_signal
 
 
 def test_live_variant_preserves_production_configuration() -> None:
     assert normalize_strategy_variant("live") == "live"
     assert strategy_variant_overrides("live") == {}
-    assert strategy_variant_entry_policy("live").blocked_confirmed_signals == ()
+    policy = strategy_variant_entry_policy("live")
+    assert policy.blocked_confirmed_signals == ()
+    assert policy.max_hold_days_by_regime_signal == ()
+    assert policy.score_adjustments_by_regime_signal == ()

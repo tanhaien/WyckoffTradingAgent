@@ -2,11 +2,13 @@ import pandas as pd
 
 from core.a_share_entry_research import (
     AShareEntryResearchPolicy,
+    adjusted_entry_score,
     confirmed_item_allowed,
     confirmed_signal_allowed,
     entry_weight_multiplier,
     market_context_allows_entry,
     rank_confirmed_items,
+    research_max_hold_days,
 )
 
 
@@ -83,3 +85,39 @@ def test_entry_weight_multiplier_matches_regime_and_signal_and_clamps_value() ->
     assert entry_weight_multiplier(policy, "SPRING", "neutral") == 0.5
     assert entry_weight_multiplier(policy, "sos", "CAUTION") == 1.0
     assert entry_weight_multiplier(policy, "evr", "NEUTRAL") == 1.0
+
+
+def test_research_max_hold_days_only_shortens_matching_regime_signal() -> None:
+    policy = AShareEntryResearchPolicy(
+        max_hold_days_by_regime_signal=(
+            ("CAUTION", "spring", 10),
+            ("CAUTION", "sos", 20),
+        )
+    )
+
+    assert research_max_hold_days(policy, "SPRING", "caution", 15) == 10
+    assert research_max_hold_days(policy, "sos", "CAUTION", 15) == 15
+    assert research_max_hold_days(policy, "spring", "NEUTRAL", 15) == 15
+
+
+def test_score_adjustment_changes_order_only_for_matching_regime_signal() -> None:
+    items = [
+        {"code": "SPRING", "score": 10.0, "signal_type": "spring"},
+        {"code": "SOS", "score": 8.0, "signal_type": "sos"},
+    ]
+    policy = AShareEntryResearchPolicy(
+        score_adjustments_by_regime_signal=(
+            ("NEUTRAL", "spring", -2.0),
+            ("NEUTRAL", "sos", 1.0),
+        )
+    )
+
+    assert adjusted_entry_score(policy, "spring", "NEUTRAL", 10.0) == 8.0
+    assert [item["code"] for item in rank_confirmed_items(items, policy, regime="NEUTRAL")] == [
+        "SOS",
+        "SPRING",
+    ]
+    assert [item["code"] for item in rank_confirmed_items(items, policy, regime="CAUTION")] == [
+        "SPRING",
+        "SOS",
+    ]

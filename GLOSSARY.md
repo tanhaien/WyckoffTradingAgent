@@ -47,11 +47,11 @@
 | **UTAD (Upthrust After Distribution)** | 派发末期，股价放量突破近期阻力后迅速收回并留下长上影。系统以 `upthrust_warning` 作为 L5 风险信号阻断新候选 |
 | **Creek/LPS confirmation** | 用前序 swing high 构造可外推的 Creek 阻力线；只有先越过 Creek、随后缩量回踩仍守在线上，才把 LPS 视为结构确认。当前仅在 D/E 消融组启用 |
 | **Strategy ablation A-E** | 同一数据与执行参数下的规则消融：A 基线，B=UTAD，C=regime 阈值，D=Creek/LPS+时序，E=全部组合；用于区分单项贡献和组合交互 |
-| **A股实证对比 A/L/M/N** | 默认 confirmed-only 研究：A 基线；L=信号族均衡排序；M=弱水温信号缩仓而非删除；N=L+M。只用于回测，不自动晋级生产 |
+| **A股实证对比 A/M/O/P/Q/R** | 默认 confirmed-only 研究：A 基线；M=弱水温信号缩仓；O=过滤 NEUTRAL Spring；P=CAUTION Spring/SOS 最长持有 10 日；Q=NEUTRAL 信号评分校准；R=O+P。只用于回测，不自动晋级生产 |
 | **不递补消融** | 先按 A 组规则锁定每日 Top-N，再应用研究过滤；被过滤的槽位保持空缺，次级候选不能顶替。用于隔离规则的边际效果 |
 | **历史 I 组（已否决）** | 曾用人工历史先验重排不同 confirmed 信号族；2026-07-18 三周期均显著恶化，代码与执行入口均已删除，不得作为生产排序依据 |
 | **历史 F-K 组** | F/G 删除 EVR、SOS 后三周期显著恶化；J 强 Spring 确认失败；H 仅牛段有效；K 仅呈现弱市防守价值。保留手动复验入口，不进入默认矩阵或生产 |
-| **Treatment exposure** | 消融组相对 A 组实际改变的 `(signal_date, code)` 交易集合；零暴露表示规则没有进入最终候选，不能据此评价收益贡献 |
+| **Treatment exposure** | 消融组相对指定参照组实际改变的 `(signal_date, code, weight, exit_date)` 处理集合；M 参照 A，O/P/Q/R 参照 M。零暴露表示规则没有改变最终选股、仓位或退出，不能据此评价收益贡献 |
 | **SOW (Sign of Weakness)** | 放量下跌，确认派发结束、下跌开始的信号 |
 
 ---

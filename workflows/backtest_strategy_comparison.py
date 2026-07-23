@@ -16,7 +16,7 @@ from workflows.backtest_strategy_variants import DEFAULT_COMPARISON_VARIANTS, VA
 
 DEFAULT_COMPARISON_PERIODS = ("recent_2m", "recent_6m", "bull_2020", "bear_2022")
 _DIR_PATTERN = re.compile(
-    r"backtest-strategy-(?P<period>recent_2m|recent_6m|bull_2020|bear_2022|custom)-(?P<variant>[A-HJ-N])"
+    r"backtest-strategy-(?P<period>recent_2m|recent_6m|bull_2020|bear_2022|custom)-(?P<variant>[A-HJ-R])"
     r"(?:-\d+)?$"
 )
 
@@ -67,9 +67,10 @@ def build_strategy_comparison(rows: list[StrategyComparisonRow]) -> dict[str, An
     by_variant = _by_variant(rows)
     available = {(row.period, row.variant) for row in rows}
     required = {(period, variant) for period in DEFAULT_COMPARISON_PERIODS for variant in DEFAULT_COMPARISON_VARIANTS}
-    evaluations = {
-        variant: _evaluate_variant(variant, values, by_variant.get("A", [])) for variant, values in by_variant.items()
-    }
+    evaluations = {}
+    for variant, values in by_variant.items():
+        reference = "M" if variant in {"O", "P", "Q", "R"} else "A"
+        evaluations[variant] = _evaluate_variant(variant, values, by_variant.get(reference, []), reference)
     return {
         "status": "ready" if required.issubset(available) else "incomplete",
         "baseline": "A",
@@ -78,17 +79,18 @@ def build_strategy_comparison(rows: list[StrategyComparisonRow]) -> dict[str, An
         "rows": [_row_payload(row) for row in sorted(rows, key=lambda row: (row.period, row.variant))],
         "evaluations": evaluations,
         "walk_forward": _walk_forward(rows),
-        "scope": "默认比较 A/L/M/N，只改变 confirmed-only 排序或研究仓位；持仓期统一使用固定退出。",
+        "scope": "M 相对 A 评估；O/P/Q/R 相对 M 评估，只归因新增过滤、条件最长持仓或研究评分。",
         "decision_rule": "至少两个周期真实改变入选交易、胜出周期过半、平均收益增量为正，且最大回撤恶化不超过2个百分点。",
     }
 
 
 def render_strategy_comparison(report: dict[str, Any]) -> str:
     lines = [
-        "# 策略 A/L/M/N A股实证对比",
+        "# 策略 A/M/O/P/Q/R A股实证对比",
         "",
-        "固定同一数据快照、确认口径、组合与退出参数，仅切换 confirmed-only 入场能力。A 为基线。",
-        "L 验证信号族均衡排序，M 验证弱水温信号缩仓，N 验证两者组合；全部为研究策略。",
+        "固定同一数据快照、确认口径和组合。A/M/O/Q 共用固定退出，P/R 只缩短指定信号的最长持有期。",
+        "M 为已验证的弱水温缩仓基线；O/P/Q/R 分别验证 NEUTRAL Spring 过滤、CAUTION 快速退出、"
+        "NEUTRAL 评分校准及过滤+快速退出；全部为研究策略。",
         "",
         "| 周期 | 组别 | 现金收益 | 现金回撤 | 成交 | 胜率 | 现金单笔 | 夏普 |",
         "|---|---|---:|---:|---:|---:|---:|---:|",
@@ -99,16 +101,17 @@ def render_strategy_comparison(report: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## 相对 A 组结论",
+            "## 相对参照组结论",
             "",
-            "| 组别 | 共同周期 | 暴露周期 | 改变交易 | 胜出 | 平均收益差 | 最大回撤恶化 | 判定 |",
-            "|---|---:|---:|---:|---:|---:|---:|---|",
+            "| 组别 | 参照 | 共同周期 | 暴露周期 | 改变交易 | 胜出 | 平均收益差 | 最大回撤恶化 | 判定 |",
+            "|---|---|---:|---:|---:|---:|---:|---:|---|",
         ]
     )
     for variant in sorted(key for key in (report.get("evaluations") or {}) if key != "A"):
         item = (report.get("evaluations") or {}).get(variant, {})
         lines.append(
-            f"| {variant} | {item.get('common_periods', 0)} | {item.get('exposure_periods', 0)} | "
+            f"| {variant} | {item.get('reference_variant', 'A')} | {item.get('common_periods', 0)} | "
+            f"{item.get('exposure_periods', 0)} | "
             f"{item.get('changed_trades', 0)} | {item.get('wins', 0)} | "
             f"{_fmt(item.get('mean_return_delta'), '%')} | {_fmt(item.get('max_drawdown_worsening'), 'pp')} | "
             f"{item.get('status', 'missing')} |"
@@ -125,10 +128,13 @@ def _by_variant(rows: list[StrategyComparisonRow]) -> dict[str, list[StrategyCom
 
 
 def _evaluate_variant(
-    variant: str, rows: list[StrategyComparisonRow], baseline_rows: list[StrategyComparisonRow]
+    variant: str,
+    rows: list[StrategyComparisonRow],
+    baseline_rows: list[StrategyComparisonRow],
+    reference_variant: str,
 ) -> dict[str, Any]:
     if variant == "A":
-        return {"status": "baseline", "common_periods": len(rows), "wins": 0}
+        return {"status": "baseline", "reference_variant": "A", "common_periods": len(rows), "wins": 0}
     baseline = {row.period: row for row in baseline_rows if row.cash_return is not None}
     pairs = [(baseline[row.period], row) for row in rows if row.period in baseline and row.cash_return is not None]
     deltas = [float(row.cash_return) - float(base.cash_return) for base, row in pairs]
@@ -150,6 +156,7 @@ def _evaluate_variant(
     status = "no_effect" if changed_trades == 0 else "pass" if passed else "review"
     return {
         "status": status if len(pairs) >= 2 else "insufficient",
+        "reference_variant": reference_variant,
         "common_periods": len(pairs),
         "exposure_periods": exposure_periods,
         "changed_trades": changed_trades,
@@ -226,7 +233,8 @@ def _trade_keys(directory: Path) -> tuple[str, ...]:
         rows = csv.DictReader(handle)
         return tuple(
             sorted(
-                f"{row.get('signal_date', '')}:{row.get('code', '')}:{_weight_key(row.get('entry_weight_multiplier'))}"
+                f"{row.get('signal_date', '')}:{row.get('code', '')}:"
+                f"{_weight_key(row.get('entry_weight_multiplier'))}:{row.get('exit_date', '')}"
                 for row in rows
             )
         )

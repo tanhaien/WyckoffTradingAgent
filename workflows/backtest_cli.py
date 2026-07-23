@@ -161,9 +161,9 @@ def _add_metadata_and_cost_args(parser: argparse.ArgumentParser) -> None:
 def _add_signal_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--strategy-variant",
-        choices=["live", "A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N"],
+        choices=["live", "A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q", "R"],
         default="live",
-        help="策略消融组：live=生产配置；A=基线；B-E=经典形态；F-N=A股实证入场研究",
+        help="策略消融组：live=生产配置；A=基线；B-E=经典形态；F-R=A股实证入场研究",
     )
     parser.add_argument(
         "--regime-filter",

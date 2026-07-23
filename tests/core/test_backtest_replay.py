@@ -473,6 +473,43 @@ def test_confirmed_signals_carry_research_entry_weight() -> None:
     assert confirmed.entry_weight_map == {"000001": 0.5}
 
 
+def test_trade_record_applies_research_hold_limit_by_regime_and_signal() -> None:
+    trade_dates = [date(2026, 1, day) for day in range(1, 6)]
+    context = replay_mod._TradeContext(
+        idx=0,
+        signal_date=date(2026, 1, 1),
+        entry_target_date=date(2026, 1, 2),
+        regime="CAUTION",
+    )
+    selected = replay_mod._RankedSelection(
+        codes=["000001"],
+        score_map={"000001": 10.0},
+        track_map={"000001": "Accum"},
+        trigger_name_map={"000001": (10.0, "spring(确认)")},
+        confirmed_codes=frozenset({"000001"}),
+        signal_type_map={"000001": "spring"},
+    )
+    policy = AShareEntryResearchPolicy(max_hold_days_by_regime_signal=(("CAUTION", "spring", 1),))
+    config = replace(_config(), hold_days=3, a_share_entry_research=policy)
+
+    record, skipped = replay_mod._trade_record_for_code(
+        "000001",
+        context,
+        selected,
+        {"000001": _hist()},
+        trade_dates,
+        {"000001": "平安银行"},
+        {},
+        {},
+        config,
+    )
+
+    assert skipped is False
+    assert record is not None
+    assert record.entry_date == date(2026, 1, 2)
+    assert record.exit_date == date(2026, 1, 3)
+
+
 def test_confirmed_signals_treats_invalid_scores_as_zero() -> None:
     class Pending:
         def write(self, *_args, **_kwargs):

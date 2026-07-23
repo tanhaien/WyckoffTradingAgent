@@ -407,7 +407,7 @@ def test_backtest_grid_exposes_portable_hypothesis_evidence():
     assert "parameter_stability.json" in workflow
     assert "walk_forward_validation.json" in workflow
     assert "strategy_compare:" in workflow
-    assert "variant: [A, L, M, N]" in workflow
+    assert "variant: [A, M, O, P, Q, R]" in workflow
     assert '[ "$INPUT_PERIOD" = "all_defined" ]' in workflow
     assert '--strategy-variant "$VARIANT"' in workflow
     assert "strategy_ablation_report.json" in workflow

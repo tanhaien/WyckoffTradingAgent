@@ -15,10 +15,12 @@ from numpy.typing import NDArray
 from core._price_math import DATE_SORTED_ATTR
 from core.a_share_entry_research import (
     AShareEntryResearchPolicy,
+    adjusted_entry_score,
     confirmed_item_allowed,
     entry_weight_multiplier,
     market_context_allows_entry,
     rank_confirmed_items,
+    research_max_hold_days,
 )
 from core.ai_candidate_allocation import AiCandidateAllocationConfig
 from core.backtest_execution import (
@@ -160,6 +162,7 @@ class _RankedSelection:
     trigger_name_map: dict[str, tuple[float, str]]
     confirmed_codes: frozenset[str] = field(default_factory=frozenset)
     entry_weight_map: dict[str, float] = field(default_factory=dict)
+    signal_type_map: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -377,6 +380,7 @@ def _limit_probe_only_selection(
             {code: selected.trigger_name_map[code] for code in kept if code in selected.trigger_name_map},
             frozenset(code for code in kept if code in selected.confirmed_codes),
             {code: selected.entry_weight_map[code] for code in kept if code in selected.entry_weight_map},
+            {code: selected.signal_type_map[code] for code in kept if code in selected.signal_type_map},
         ),
         len(selected.codes) - 1,
     )
@@ -534,6 +538,7 @@ def _select_ranked_codes(
             _name_score_map(ctx.result, confirmed, prefer_confirmed=config.pending_mode == "only"),
             frozenset(confirmed.codes),
             confirmed.entry_weight_map,
+            confirmed.trigger_map,
         ),
         confirmed.observed_count,
     )
@@ -555,7 +560,12 @@ def _confirmed_signals(
         signal_date_str, ctx.result.triggers, ctx.day_df_map, ctx.regime, ctx.name_map, sector_map, ctx.day_cfg
     )
     confirmed_items = pending_pool.tick(ctx.day_df_map, signal_date_str)
-    ranked_items = rank_confirmed_items(confirmed_items, research, rotation_key=ctx.signal_date.toordinal())
+    ranked_items = rank_confirmed_items(
+        confirmed_items,
+        research,
+        rotation_key=ctx.signal_date.toordinal(),
+        regime=ctx.regime,
+    )
     observed_count = len(ranked_items)
     if not market_context_allows_entry(research, regime=ctx.regime, breadth=ctx.breadth):
         return _ConfirmedSignals([], {}, {}, {}, observed_count)
@@ -577,7 +587,7 @@ def _confirmed_signals(
         ):
             continue
         codes.append(code)
-        score_map[code] = candidate_score_value(item.get("score"))
+        score_map[code] = adjusted_entry_score(research, signal_type, ctx.regime, item.get("score"))
         track_map[code] = candidate_entry_track(item, fields=("track", "signal_type"))
         trigger_map[code] = signal_type
         entry_weight_map[code] = entry_weight_multiplier(research, signal_type, ctx.regime)
@@ -685,7 +695,21 @@ def _trade_record_for_code(
     full_df = all_df_map.get(code)
     if full_df is None or full_df.empty:
         return None, False
-    plan, missing_skipped = _entry_plan(full_df, code, ctx, trade_dates, intraday_cache, config)
+    max_hold_days = research_max_hold_days(
+        config.a_share_entry_research,
+        selected.signal_type_map.get(code),
+        ctx.regime,
+        config.hold_days,
+    )
+    plan, missing_skipped = _entry_plan(
+        full_df,
+        code,
+        ctx,
+        trade_dates,
+        intraday_cache,
+        config,
+        max_hold_days=max_hold_days,
+    )
     if plan is None:
         return None, missing_skipped
     day_ohlc = _ohlc_for_code(code, full_df, ohlc_cache)
@@ -714,6 +738,8 @@ def _entry_plan(
     trade_dates: list[date],
     intraday_cache: dict,
     config: BacktestReplayConfig,
+    *,
+    max_hold_days: int | None = None,
 ) -> tuple[_EntryPlan | None, bool]:
     entry_close, actual_entry_date, source = entry_on_or_after(
         full_df,
@@ -729,7 +755,7 @@ def _entry_plan(
     if entry_close is None or entry_close <= 0 or actual_entry_date is None:
         return None, source == "tail_1455_missing_skip"
     entry_idx = _trade_date_index(trade_dates, actual_entry_date, ctx.idx + 1)
-    max_hold = config.max_atr_hold_days if config.exit.exit_mode == "atr" else config.hold_days
+    max_hold = config.max_atr_hold_days if config.exit.exit_mode == "atr" else max_hold_days or config.hold_days
     exit_idx = entry_idx + max_hold
     if exit_idx >= len(trade_dates) and config.exit.exit_mode != "atr":
         return None, False

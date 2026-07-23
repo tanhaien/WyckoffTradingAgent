@@ -5,6 +5,7 @@ from workflows.backtest_strategy_comparison import (
     load_strategy_comparison_rows,
     render_strategy_comparison,
 )
+from workflows.backtest_strategy_variants import DEFAULT_COMPARISON_VARIANTS
 
 
 def _write_summary(
@@ -40,30 +41,39 @@ def _write_summary(
 def test_strategy_comparison_builds_relative_and_walk_forward_results(tmp_path: Path) -> None:
     periods = ["bull_2020", "bear_2022", "recent_6m", "recent_2m"]
     for period_index, period in enumerate(periods):
-        for variant_index, variant in enumerate(("A", "L", "M", "N")):
+        for variant_index, variant in enumerate(DEFAULT_COMPARISON_VARIANTS):
             _write_summary(tmp_path, period, variant, 2.0 + variant_index + period_index, -4.0)
 
     rows = load_strategy_comparison_rows(tmp_path)
     report = build_strategy_comparison(rows)
 
-    assert len(rows) == 16
+    assert len(rows) == 24
     assert report["status"] == "ready"
-    assert report["evaluations"]["N"]["status"] == "pass"
-    assert report["evaluations"]["N"]["exposure_periods"] == 4
-    assert report["evaluations"]["N"]["changed_trades"] == 8
+    assert report["evaluations"]["M"]["reference_variant"] == "A"
+    assert report["evaluations"]["O"]["reference_variant"] == "M"
+    assert report["evaluations"]["R"]["status"] == "pass"
+    assert report["evaluations"]["R"]["exposure_periods"] == 4
+    assert report["evaluations"]["R"]["changed_trades"] == 8
     assert len(report["walk_forward"]["windows"]) == 2
-    assert "相对 A 组结论" in render_strategy_comparison(report)
+    assert "相对参照组结论" in render_strategy_comparison(report)
 
 
 def test_strategy_comparison_requires_all_default_period_cells(tmp_path: Path) -> None:
     for period in ("bull_2020", "bear_2022", "recent_6m"):
-        for variant in ("A", "L", "M", "N"):
+        for variant in DEFAULT_COMPARISON_VARIANTS:
             _write_summary(tmp_path, period, variant, 2.0, -4.0)
 
     report = build_strategy_comparison(load_strategy_comparison_rows(tmp_path))
 
     assert report["status"] == "incomplete"
-    assert set(report["missing_cells"]) == {"recent_2m/A", "recent_2m/L", "recent_2m/M", "recent_2m/N"}
+    assert set(report["missing_cells"]) == {
+        "recent_2m/A",
+        "recent_2m/M",
+        "recent_2m/O",
+        "recent_2m/P",
+        "recent_2m/Q",
+        "recent_2m/R",
+    }
 
 
 def test_strategy_comparison_uses_executed_cash_trade_average(tmp_path: Path) -> None:
@@ -117,3 +127,24 @@ def test_strategy_comparison_counts_position_weight_as_treatment_exposure(tmp_pa
 
     assert report["evaluations"]["M"]["exposure_periods"] == 3
     assert report["evaluations"]["M"]["changed_trades"] == 6
+
+
+def test_strategy_comparison_counts_changed_exit_as_treatment_exposure(tmp_path: Path) -> None:
+    for period in ("bull_2020", "bear_2022", "recent_6m"):
+        _write_summary(tmp_path, period, "M", 2.0, -4.0)
+        _write_summary(tmp_path, period, "P", 3.0, -4.0)
+        baseline = tmp_path / f"backtest-strategy-{period}-M" / "trades_fixture.csv"
+        candidate = tmp_path / f"backtest-strategy-{period}-P" / "trades_fixture.csv"
+        baseline.write_text(
+            "signal_date,code,entry_weight_multiplier,exit_date\n2020-01-02,SAME,1.0,2020-01-20\n",
+            encoding="utf-8",
+        )
+        candidate.write_text(
+            "signal_date,code,entry_weight_multiplier,exit_date\n2020-01-02,SAME,1.0,2020-01-15\n",
+            encoding="utf-8",
+        )
+
+    report = build_strategy_comparison(load_strategy_comparison_rows(tmp_path))
+
+    assert report["evaluations"]["P"]["exposure_periods"] == 3
+    assert report["evaluations"]["P"]["changed_trades"] == 6

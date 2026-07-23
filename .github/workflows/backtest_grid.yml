@@ -367,8 +367,8 @@ jobs:
       max-parallel: 20
       matrix:
         period_key: [recent_2m, recent_6m, bull_2020, bear_2022]
-        # 上轮 F/G/J 被否决，H/K 仅呈现状态依赖；本轮验证均衡排序与 K 的软仓位版本。
-        variant: [A, L, M, N]
+        # M 是本轮共同软仓位基线；O/P/Q/R 分别验证过滤、条件持有、评分校准及组合。
+        variant: [A, M, O, P, Q, R]
     steps:
       - name: Resolve period dates
         id: period

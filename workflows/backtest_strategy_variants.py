@@ -19,9 +19,13 @@ VARIANT_LABELS = {
     "L": "A股实证：confirmed 信号族均衡排序",
     "M": "A股实证：K 弱水温规则改为缩仓而非删除",
     "N": "A股实证：信号族均衡排序 + 弱水温缩仓",
+    "O": "A股实证：M + NEUTRAL Spring 不递补过滤",
+    "P": "A股实证：M + CAUTION Spring/SOS 最长持有 10 日",
+    "Q": "A股实证：M + NEUTRAL 信号评分校准",
+    "R": "A股实证：O + CAUTION Spring/SOS 最长持有 10 日",
 }
 
-DEFAULT_COMPARISON_VARIANTS = ("A", "L", "M", "N")
+DEFAULT_COMPARISON_VARIANTS = ("A", "M", "O", "P", "Q", "R")
 
 _ALL_SWITCHES = {
     "dist_upthrust_enabled": False,
@@ -49,6 +53,10 @@ _VARIANT_SWITCHES = {
     "L": {},
     "M": {},
     "N": {},
+    "O": {},
+    "P": {},
+    "Q": {},
+    "R": {},
 }
 
 _K_SOFT_WEIGHTS = (
@@ -58,6 +66,16 @@ _K_SOFT_WEIGHTS = (
     ("PANIC_REPAIR_CONFIRMED", "sos", 0.25),
     ("PANIC_REPAIR_INTRADAY", "spring", 0.25),
     ("PANIC_REPAIR_INTRADAY", "sos", 0.25),
+)
+
+_CAUTION_FAST_EXITS = (
+    ("CAUTION", "spring", 10),
+    ("CAUTION", "sos", 10),
+)
+
+_NEUTRAL_SCORE_ADJUSTMENTS = (
+    ("NEUTRAL", "spring", -2.0),
+    ("NEUTRAL", "sos", 1.0),
 )
 
 _ENTRY_POLICIES = {
@@ -88,6 +106,25 @@ _ENTRY_POLICIES = {
         balance_confirmed_signal_families=True,
         entry_weight_multipliers=_K_SOFT_WEIGHTS,
     ),
+    "O": AShareEntryResearchPolicy(
+        blocked_confirmed_signals_by_regime=(("NEUTRAL", ("spring",)),),
+        entry_weight_multipliers=_K_SOFT_WEIGHTS,
+        preserve_rank_slots_before_filtering=True,
+    ),
+    "P": AShareEntryResearchPolicy(
+        entry_weight_multipliers=_K_SOFT_WEIGHTS,
+        max_hold_days_by_regime_signal=_CAUTION_FAST_EXITS,
+    ),
+    "Q": AShareEntryResearchPolicy(
+        entry_weight_multipliers=_K_SOFT_WEIGHTS,
+        score_adjustments_by_regime_signal=_NEUTRAL_SCORE_ADJUSTMENTS,
+    ),
+    "R": AShareEntryResearchPolicy(
+        blocked_confirmed_signals_by_regime=(("NEUTRAL", ("spring",)),),
+        entry_weight_multipliers=_K_SOFT_WEIGHTS,
+        max_hold_days_by_regime_signal=_CAUTION_FAST_EXITS,
+        preserve_rank_slots_before_filtering=True,
+    ),
 }
 
 
@@ -95,7 +132,9 @@ def normalize_strategy_variant(raw: str) -> str:
     value = str(raw or "live").strip()
     normalized = value.upper() if value.lower() != "live" else "live"
     if normalized not in VARIANT_LABELS:
-        raise ValueError("strategy_variant 必须是 live / A / B / C / D / E / F / G / H / J / K / L / M / N")
+        raise ValueError(
+            "strategy_variant 必须是 live / A / B / C / D / E / F / G / H / J / K / L / M / N / O / P / Q / R"
+        )
     return normalized
 
 
