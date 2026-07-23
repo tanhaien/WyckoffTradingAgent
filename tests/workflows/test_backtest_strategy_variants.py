@@ -18,7 +18,7 @@ def test_strategy_variants_isolate_each_research_switch() -> None:
         "signal_sequence_bonus_enabled": True,
     }
     assert all(strategy_variant_overrides("E").values())
-    assert DEFAULT_COMPARISON_VARIANTS == ("A", "F", "G", "H", "J", "K")
+    assert DEFAULT_COMPARISON_VARIANTS == ("A", "L", "M", "N")
     assert strategy_variant_overrides("F") == baseline
     assert strategy_variant_entry_policy("F").blocked_confirmed_signals == ("evr",)
     assert strategy_variant_entry_policy("F").preserve_rank_slots_before_filtering is True
@@ -29,6 +29,10 @@ def test_strategy_variants_isolate_each_research_switch() -> None:
         "NEUTRAL",
         ("spring", "evr"),
     )
+    assert strategy_variant_entry_policy("L").balance_confirmed_signal_families is True
+    assert strategy_variant_entry_policy("M").entry_weight_multipliers[0] == ("NEUTRAL", "spring", 0.5)
+    assert strategy_variant_entry_policy("N").balance_confirmed_signal_families is True
+    assert strategy_variant_entry_policy("N").entry_weight_multipliers
 
 
 def test_live_variant_preserves_production_configuration() -> None:

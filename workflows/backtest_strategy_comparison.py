@@ -14,8 +14,9 @@ from typing import Any
 
 from workflows.backtest_strategy_variants import DEFAULT_COMPARISON_VARIANTS, VARIANT_LABELS
 
+DEFAULT_COMPARISON_PERIODS = ("recent_2m", "recent_6m", "bull_2020", "bear_2022")
 _DIR_PATTERN = re.compile(
-    r"backtest-strategy-(?P<period>recent_2m|recent_6m|bull_2020|bear_2022|custom)-(?P<variant>[A-HJK])"
+    r"backtest-strategy-(?P<period>recent_2m|recent_6m|bull_2020|bear_2022|custom)-(?P<variant>[A-HJ-N])"
     r"(?:-\d+)?$"
 )
 
@@ -64,33 +65,37 @@ def load_strategy_comparison_rows(artifacts_dir: Path) -> list[StrategyCompariso
 
 def build_strategy_comparison(rows: list[StrategyComparisonRow]) -> dict[str, Any]:
     by_variant = _by_variant(rows)
+    available = {(row.period, row.variant) for row in rows}
+    required = {(period, variant) for period in DEFAULT_COMPARISON_PERIODS for variant in DEFAULT_COMPARISON_VARIANTS}
     evaluations = {
         variant: _evaluate_variant(variant, values, by_variant.get("A", [])) for variant, values in by_variant.items()
     }
     return {
-        "status": "ready" if set(DEFAULT_COMPARISON_VARIANTS).issubset(by_variant) else "incomplete",
+        "status": "ready" if required.issubset(available) else "incomplete",
         "baseline": "A",
+        "missing_cells": [f"{period}/{variant}" for period, variant in sorted(required - available)],
         "variant_labels": {key: VARIANT_LABELS[key] for key in by_variant if key in VARIANT_LABELS},
         "rows": [_row_payload(row) for row in sorted(rows, key=lambda row: (row.period, row.variant))],
         "evaluations": evaluations,
         "walk_forward": _walk_forward(rows),
-        "scope": "默认比较 A/F/G/H/J/K，只改变 confirmed-only 入场筛选；持仓期统一使用固定退出。",
+        "scope": "默认比较 A/L/M/N，只改变 confirmed-only 排序或研究仓位；持仓期统一使用固定退出。",
         "decision_rule": "至少两个周期真实改变入选交易、胜出周期过半、平均收益增量为正，且最大回撤恶化不超过2个百分点。",
     }
 
 
 def render_strategy_comparison(report: dict[str, Any]) -> str:
     lines = [
-        "# 策略 A/F/G/H/J/K A股实证消融对比",
+        "# 策略 A/L/M/N A股实证对比",
         "",
         "固定同一数据快照、确认口径、组合与退出参数，仅切换 confirmed-only 入场能力。A 为基线。",
-        "F/G 先锁定基线排名槽位再剔除信号，避免次级候选递补污染；H 验证 NEUTRAL 广度闸门。",
-        "J 验证 Spring 强价格确认，K 验证信号族按市场水温分层；全部为研究策略。",
+        "L 验证信号族均衡排序，M 验证弱水温信号缩仓，N 验证两者组合；全部为研究策略。",
         "",
         "| 周期 | 组别 | 现金收益 | 现金回撤 | 成交 | 胜率 | 现金单笔 | 夏普 |",
         "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     lines.extend(_row_line(row) for row in report.get("rows", []))
+    if report.get("missing_cells"):
+        lines.extend(["", f"- 证据不完整，缺少：{', '.join(report['missing_cells'])}。"])
     lines.extend(
         [
             "",
@@ -157,7 +162,7 @@ def _evaluate_variant(
 def _walk_forward(rows: list[StrategyComparisonRow]) -> dict[str, Any]:
     grouped: dict[str, list[StrategyComparisonRow]] = defaultdict(list)
     for row in rows:
-        if row.cash_return is not None:
+        if row.cash_return is not None and row.period != "recent_2m":
             grouped[row.period].append(row)
     periods = sorted(grouped, key=lambda key: max((row.end for row in grouped[key]), default=""))
     windows = []
@@ -219,7 +224,19 @@ def _trade_keys(directory: Path) -> tuple[str, ...]:
         return ()
     with paths[0].open(encoding="utf-8-sig", newline="") as handle:
         rows = csv.DictReader(handle)
-        return tuple(sorted(f"{row.get('signal_date', '')}:{row.get('code', '')}" for row in rows))
+        return tuple(
+            sorted(
+                f"{row.get('signal_date', '')}:{row.get('code', '')}:{_weight_key(row.get('entry_weight_multiplier'))}"
+                for row in rows
+            )
+        )
+
+
+def _weight_key(raw: object) -> str:
+    try:
+        return f"{float(raw):.4f}" if raw not in (None, "") else "1.0000"
+    except (TypeError, ValueError):
+        return "1.0000"
 
 
 def _cash_trade_average(directory: Path) -> float | None:

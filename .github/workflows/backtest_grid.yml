@@ -111,7 +111,8 @@ jobs:
         run: |
           MATRIX_PERIOD="${{ matrix.period_key }}"
           ACTIVE="false"
-          if { [ "$INPUT_PERIOD" = "all_defined" ] && [ "$MATRIX_PERIOD" != "recent_2m" ]; } || [ "$INPUT_PERIOD" = "$MATRIX_PERIOD" ]; then
+          # all_defined 的 grid 仍跳过短窗，但 strategy_compare 需要共享 recent_2m 快照。
+          if [ "$INPUT_PERIOD" = "all_defined" ] || [ "$INPUT_PERIOD" = "$MATRIX_PERIOD" ]; then
             ACTIVE="true"
           elif [ "$INPUT_PERIOD" = "custom" ] && [ "$MATRIX_PERIOD" = "recent_6m" ]; then
             ACTIVE="true"
@@ -366,8 +367,8 @@ jobs:
       max-parallel: 20
       matrix:
         period_key: [recent_2m, recent_6m, bull_2020, bear_2022]
-        # I 的人工先验校准已失败；F/G 改为不递补纯消融，J/K 检验 Spring 与水温分层。
-        variant: [A, F, G, H, J, K]
+        # 上轮 F/G/J 被否决，H/K 仅呈现状态依赖；本轮验证均衡排序与 K 的软仓位版本。
+        variant: [A, L, M, N]
     steps:
       - name: Resolve period dates
         id: period
@@ -376,7 +377,7 @@ jobs:
         run: |
           MATRIX_PERIOD="${{ matrix.period_key }}"
           ACTIVE="false"
-          if { [ "$INPUT_PERIOD" = "all_defined" ] && [ "$MATRIX_PERIOD" != "recent_2m" ]; } || [ "$INPUT_PERIOD" = "$MATRIX_PERIOD" ]; then
+          if [ "$INPUT_PERIOD" = "all_defined" ] || [ "$INPUT_PERIOD" = "$MATRIX_PERIOD" ]; then
             ACTIVE="true"
           elif [ "$INPUT_PERIOD" = "custom" ] && [ "$MATRIX_PERIOD" = "recent_6m" ]; then
             ACTIVE="true"
@@ -500,7 +501,7 @@ jobs:
           PERIOD: ${{ inputs.period || 'recent_6m' }}
         run: |
           if [ "$PERIOD" = "all_defined" ]; then
-            echo "BT_PERIOD_LABEL=recent_6m,bull_2020,bear_2022" >> "$GITHUB_ENV"
+            echo "BT_PERIOD_LABEL=recent_2m(strategy),recent_6m,bull_2020,bear_2022" >> "$GITHUB_ENV"
             echo "BT_START=multi" >> "$GITHUB_ENV"
             echo "BT_END=multi" >> "$GITHUB_ENV"
           elif [ "$PERIOD" = "recent_2m" ]; then
@@ -569,13 +570,21 @@ jobs:
             --generated-at "$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S Asia/Shanghai')"
 
       - name: Build strategy comparison report
+        env:
+          INPUT_PERIOD: ${{ inputs.period || 'recent_6m' }}
         run: |
+          EXTRA_ARGS=()
+          if [ "$INPUT_PERIOD" = "all_defined" ]; then
+            EXTRA_ARGS+=(--require-complete)
+          fi
           python3 scripts/build_backtest_strategy_comparison.py \
             --artifacts-dir artifacts \
             --markdown-output strategy_ablation_report.md \
-            --json-output strategy_ablation_report.json
+            --json-output strategy_ablation_report.json \
+            "${EXTRA_ARGS[@]}"
 
       - name: Upload market backtest report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backtest-market-report-${{ github.run_number }}

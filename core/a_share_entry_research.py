@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,7 +13,9 @@ import pandas as pd
 class AShareEntryResearchPolicy:
     blocked_confirmed_signals: tuple[str, ...] = ()
     blocked_confirmed_signals_by_regime: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    entry_weight_multipliers: tuple[tuple[str, str, float], ...] = ()
     preserve_rank_slots_before_filtering: bool = False
+    balance_confirmed_signal_families: bool = False
     require_neutral_breadth_confirmation: bool = False
     require_strong_spring_confirmation: bool = False
     neutral_breadth_ratio_min: float = 50.0
@@ -21,6 +24,16 @@ class AShareEntryResearchPolicy:
     neutral_breadth_sample_min: int = 100
     spring_reclaim_pct_min: float = 1.0
     spring_close_position_min: float = 65.0
+
+
+_BALANCED_SIGNAL_FAMILY_ORDER = (
+    "sos",
+    "evr",
+    "spring",
+    "lps",
+    "trend_pullback",
+    "compression",
+)
 
 
 def normalized_signal_type(raw: object) -> str:
@@ -42,6 +55,49 @@ def confirmed_signal_allowed(
         if regime_key == str(configured_regime).strip().upper():
             return signal not in {normalized_signal_type(item) for item in configured_signals}
     return True
+
+
+def rank_confirmed_items(
+    items: list[dict[str, Any]],
+    policy: AShareEntryResearchPolicy,
+    *,
+    rotation_key: int = 0,
+) -> list[dict[str, Any]]:
+    if not policy.balance_confirmed_signal_families:
+        return _rank_best_by_code(items)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in _rank_best_by_code_and_signal(items):
+        grouped.setdefault(normalized_signal_type(item.get("signal_type")), []).append(item)
+    families = [family for family in _BALANCED_SIGNAL_FAMILY_ORDER if family in grouped]
+    families.extend(sorted(set(grouped) - set(families)))
+    if families:
+        offset = int(rotation_key) % len(families)
+        families = families[offset:] + families[:offset]
+    ranked: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index in range(max((len(values) for values in grouped.values()), default=0)):
+        for family in families:
+            if index >= len(grouped[family]):
+                continue
+            item = grouped[family][index]
+            code = str(item.get("code", "")).strip()
+            if code and code not in seen:
+                ranked.append(item)
+                seen.add(code)
+    return ranked
+
+
+def entry_weight_multiplier(
+    policy: AShareEntryResearchPolicy,
+    signal_type: object,
+    regime: object,
+) -> float:
+    signal = normalized_signal_type(signal_type)
+    regime_key = str(regime or "").strip().upper()
+    for configured_regime, configured_signal, multiplier in policy.entry_weight_multipliers:
+        if regime_key == str(configured_regime).strip().upper() and signal == normalized_signal_type(configured_signal):
+            return min(max(float(multiplier), 0.0), 1.0)
+    return 1.0
 
 
 def market_context_allows_entry(
@@ -103,6 +159,32 @@ def _strong_spring_confirmation(
         and values["close"] > values["open"]
         and close_position >= policy.spring_close_position_min
     )
+
+
+def _rank_best_by_code(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best: dict[str, dict[str, Any]] = {}
+    for item in items:
+        code = str(item.get("code", "")).strip()
+        current = best.get(code)
+        if code and (current is None or _score(item) > _score(current)):
+            best[code] = item
+    return sorted(best.values(), key=lambda item: (-_score(item), str(item.get("code", ""))))
+
+
+def _rank_best_by_code_and_signal(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    best: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in items:
+        code = str(item.get("code", "")).strip()
+        key = (code, normalized_signal_type(item.get("signal_type")))
+        current = best.get(key)
+        if code and (current is None or _score(item) > _score(current)):
+            best[key] = item
+    return sorted(best.values(), key=lambda item: (-_score(item), str(item.get("code", ""))))
+
+
+def _score(item: dict[str, Any]) -> float:
+    value = _number(item.get("score"))
+    return value if math.isfinite(value) else 0.0
 
 
 def _number(raw: object) -> float:

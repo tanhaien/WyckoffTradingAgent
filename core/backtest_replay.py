@@ -16,7 +16,9 @@ from core._price_math import DATE_SORTED_ATTR
 from core.a_share_entry_research import (
     AShareEntryResearchPolicy,
     confirmed_item_allowed,
+    entry_weight_multiplier,
     market_context_allows_entry,
+    rank_confirmed_items,
 )
 from core.ai_candidate_allocation import AiCandidateAllocationConfig
 from core.backtest_execution import (
@@ -147,6 +149,7 @@ class _ConfirmedSignals:
     track_map: dict[str, str]
     trigger_map: dict[str, str]
     observed_count: int = 0
+    entry_weight_map: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -156,6 +159,7 @@ class _RankedSelection:
     track_map: dict[str, str]
     trigger_name_map: dict[str, tuple[float, str]]
     confirmed_codes: frozenset[str] = field(default_factory=frozenset)
+    entry_weight_map: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -372,6 +376,7 @@ def _limit_probe_only_selection(
             {code: selected.track_map[code] for code in kept if code in selected.track_map},
             {code: selected.trigger_name_map[code] for code in kept if code in selected.trigger_name_map},
             frozenset(code for code in kept if code in selected.confirmed_codes),
+            {code: selected.entry_weight_map[code] for code in kept if code in selected.entry_weight_map},
         ),
         len(selected.codes) - 1,
     )
@@ -528,6 +533,7 @@ def _select_ranked_codes(
             track_map,
             _name_score_map(ctx.result, confirmed, prefer_confirmed=config.pending_mode == "only"),
             frozenset(confirmed.codes),
+            confirmed.entry_weight_map,
         ),
         confirmed.observed_count,
     )
@@ -549,7 +555,7 @@ def _confirmed_signals(
         signal_date_str, ctx.result.triggers, ctx.day_df_map, ctx.regime, ctx.name_map, sector_map, ctx.day_cfg
     )
     confirmed_items = pending_pool.tick(ctx.day_df_map, signal_date_str)
-    ranked_items = _rank_confirmed_items(confirmed_items)
+    ranked_items = rank_confirmed_items(confirmed_items, research, rotation_key=ctx.signal_date.toordinal())
     observed_count = len(ranked_items)
     if not market_context_allows_entry(research, regime=ctx.regime, breadth=ctx.breadth):
         return _ConfirmedSignals([], {}, {}, {}, observed_count)
@@ -559,6 +565,7 @@ def _confirmed_signals(
     score_map: dict[str, float] = {}
     track_map: dict[str, str] = {}
     trigger_map: dict[str, str] = {}
+    entry_weight_map: dict[str, float] = {}
     for item in ranked_items:
         signal_type = str(item.get("signal_type", "confirmed"))
         code = str(item.get("code", "")).strip()
@@ -573,22 +580,8 @@ def _confirmed_signals(
         score_map[code] = candidate_score_value(item.get("score"))
         track_map[code] = candidate_entry_track(item, fields=("track", "signal_type"))
         trigger_map[code] = signal_type
-    return _ConfirmedSignals(codes, score_map, track_map, trigger_map, observed_count)
-
-
-def _rank_confirmed_items(items: list[dict]) -> list[dict]:
-    best_by_code: dict[str, dict] = {}
-    for item in items:
-        code = str(item.get("code", "")).strip()
-        if not code:
-            continue
-        current = best_by_code.get(code)
-        if current is None or candidate_score_value(item.get("score")) > candidate_score_value(current.get("score")):
-            best_by_code[code] = item
-    return sorted(
-        best_by_code.values(),
-        key=lambda item: (-candidate_score_value(item.get("score")), str(item.get("code", ""))),
-    )
+        entry_weight_map[code] = entry_weight_multiplier(research, signal_type, ctx.regime)
+    return _ConfirmedSignals(codes, score_map, track_map, trigger_map, observed_count, entry_weight_map)
 
 
 def _merge_confirmed_metadata(
@@ -799,6 +792,7 @@ def _make_trade_record(
         mfe_pct=mfe_pct,
         mae_pct=mae_pct,
         signal_confirmed=code in selected.confirmed_codes,
+        entry_weight_multiplier=selected.entry_weight_map.get(code, 1.0),
     )
 
 

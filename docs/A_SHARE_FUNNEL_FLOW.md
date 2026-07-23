@@ -341,17 +341,16 @@ RISK -->|PANIC_REPAIR_CONFIRMED| REPAIR_PROBE["最多1只小额 PROBE<br/>禁止
 
 `entry_price_mode=open` 是当前生产候选默认口径；信号确认口径 `pending_mode=only`（仅用跨日 confirmed 信号）与实盘 Step4 `STEP4_REQUIRE_CONFIRMED_BUY_CANDIDATE` 严格对齐。`off`/`both` 仅作为跳过或放宽确认门槛的研究对照，不代表实盘可执行表现；`open`、`close` 和 `tail_1455` 也必须在相同 confirmed-only 门槛下完成对照后，才能宣称某种入场口径更优。最终 OMS 将 AI 结构区间、涨幅和 ATR 防追高约束收敛成唯一允许买入区间；区间缺失或无交集直接拒单，次日开盘价不在区间内也不执行。
 
-Backtest Grid 的默认策略消融为 `A/F/G/H/J/K`。F/G 先锁定 A 组每日排名槽位，再纯消融 EVR、SOS，
-被过滤的槽位不允许次级候选递补；H 检验 NEUTRAL 是否需要额外市场广度确认；J 检验 Spring 是否必须
-完成更强的价格收复；K 检验信号族是否应随市场水温切换。它们只作用于回放中的 confirmed 入场选择；
-市场广度不足会拦截当日入场，但 pending 池仍继续写入、确认和过期，不会因为研究闸门暂停 TTL。经典
-B-E 仍可手动复验；历史 I 先验重排已被三周期结果否决并退出执行矩阵。
+Backtest Grid 的默认策略对比为 `A/L/M/N`，覆盖近期 2 个月、近期 6 个月、牛段和熊段。L 在 confirmed
+信号族内部按原分排序、族间按交易日轮转，避免 Spring/SOS/EVR 的不可比分数直接混排；M 将历史 K 组的弱水温
+信号硬删除改为 25%～50% 研究仓位；N 组合两者。它们只作用于回放选择和现金预算，不会改写 pending
+确认状态机、生产漏斗、Step3 或 OMS。经典 B-E 与历史 F-K 仍可手动复验，但不再占用默认矩阵。
 
 | 项 | 说明 |
 |----|------|
 | 入口 | 漏斗候选行内联展示（`workflows/funnel_render.py`） |
 | 候选 | 读 `signal_pending`；**confirmed 才可执行** |
-| 排序 | 生产仍使用 confirmed → 主线/趋势 → 信号分；研究组不能用人工先验改写生产排序 |
+| 排序 | 生产仍使用 confirmed → 主线/趋势 → 信号分；L/N 的信号族轮转只存在于回测研究 |
 | 主线语义 | `candidate_theme / candidate_phase / candidate_role` 从推荐、信号贯穿到执行记录；LLM 只解释不重判 |
 | 禁新开 | `RISK_ON` 与弱市/修复期与 Step4 对齐，新票不买 |
 | 持仓诊断 | `workflows/holding_diagnosis_core.py` + `core/holding_diagnostic.py`（日线为准），硬止损约 12%；非主线满 5 日建议时间止盈 |

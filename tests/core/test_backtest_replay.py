@@ -448,6 +448,31 @@ def test_confirmed_signals_require_breadth_for_neutral_research_variant() -> Non
     assert pending.ticked is True
 
 
+def test_confirmed_signals_carry_research_entry_weight() -> None:
+    class Pending:
+        def write(self, *_args, **_kwargs):
+            return None
+
+        def tick(self, *_args, **_kwargs):
+            return [{"code": "000001", "score": 10.0, "signal_type": "spring"}]
+
+    ctx = replay_mod._DayContext(
+        idx=0,
+        signal_date=date(2026, 1, 1),
+        entry_target_date=date(2026, 1, 2),
+        day_df_map={"000001": _hist()},
+        name_map={},
+        day_cfg=FunnelConfig(trading_days=3),
+        result=_result(),
+        regime="NEUTRAL",
+    )
+    policy = AShareEntryResearchPolicy(entry_weight_multipliers=(("NEUTRAL", "spring", 0.5),))
+
+    confirmed = replay_mod._confirmed_signals(ctx, Pending(), {}, policy)
+
+    assert confirmed.entry_weight_map == {"000001": 0.5}
+
+
 def test_confirmed_signals_treats_invalid_scores_as_zero() -> None:
     class Pending:
         def write(self, *_args, **_kwargs):

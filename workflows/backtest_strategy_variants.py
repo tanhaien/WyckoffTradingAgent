@@ -16,9 +16,12 @@ VARIANT_LABELS = {
     "H": "A股实证：NEUTRAL 入场需广度确认",
     "J": "A股实证：Spring 强价格确认，不递补次级候选",
     "K": "A股实证：信号族按市场水温分层，不递补次级候选",
+    "L": "A股实证：confirmed 信号族均衡排序",
+    "M": "A股实证：K 弱水温规则改为缩仓而非删除",
+    "N": "A股实证：信号族均衡排序 + 弱水温缩仓",
 }
 
-DEFAULT_COMPARISON_VARIANTS = ("A", "F", "G", "H", "J", "K")
+DEFAULT_COMPARISON_VARIANTS = ("A", "L", "M", "N")
 
 _ALL_SWITCHES = {
     "dist_upthrust_enabled": False,
@@ -43,7 +46,19 @@ _VARIANT_SWITCHES = {
     "H": {},
     "J": {},
     "K": {},
+    "L": {},
+    "M": {},
+    "N": {},
 }
+
+_K_SOFT_WEIGHTS = (
+    ("NEUTRAL", "spring", 0.5),
+    ("NEUTRAL", "evr", 0.5),
+    ("PANIC_REPAIR_CONFIRMED", "spring", 0.25),
+    ("PANIC_REPAIR_CONFIRMED", "sos", 0.25),
+    ("PANIC_REPAIR_INTRADAY", "spring", 0.25),
+    ("PANIC_REPAIR_INTRADAY", "sos", 0.25),
+)
 
 _ENTRY_POLICIES = {
     "F": AShareEntryResearchPolicy(
@@ -67,6 +82,12 @@ _ENTRY_POLICIES = {
         ),
         preserve_rank_slots_before_filtering=True,
     ),
+    "L": AShareEntryResearchPolicy(balance_confirmed_signal_families=True),
+    "M": AShareEntryResearchPolicy(entry_weight_multipliers=_K_SOFT_WEIGHTS),
+    "N": AShareEntryResearchPolicy(
+        balance_confirmed_signal_families=True,
+        entry_weight_multipliers=_K_SOFT_WEIGHTS,
+    ),
 }
 
 
@@ -74,7 +95,7 @@ def normalize_strategy_variant(raw: str) -> str:
     value = str(raw or "live").strip()
     normalized = value.upper() if value.lower() != "live" else "live"
     if normalized not in VARIANT_LABELS:
-        raise ValueError("strategy_variant 必须是 live / A / B / C / D / E / F / G / H / J / K")
+        raise ValueError("strategy_variant 必须是 live / A / B / C / D / E / F / G / H / J / K / L / M / N")
     return normalized
 
 

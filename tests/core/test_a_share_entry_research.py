@@ -4,7 +4,9 @@ from core.a_share_entry_research import (
     AShareEntryResearchPolicy,
     confirmed_item_allowed,
     confirmed_signal_allowed,
+    entry_weight_multiplier,
     market_context_allows_entry,
+    rank_confirmed_items,
 )
 
 
@@ -52,3 +54,32 @@ def test_strong_spring_confirmation_requires_price_reclaim_and_strong_close() ->
     history.loc[history.index[-1], "close"] = 10.05
     assert not confirmed_item_allowed(policy, item, regime="NEUTRAL", history=history)
     assert confirmed_item_allowed(policy, {"signal_type": "sos"}, regime="NEUTRAL", history=None)
+
+
+def test_balanced_rank_interleaves_signal_families_without_losing_family_score_order() -> None:
+    items = [
+        {"code": "S1", "score": 100, "signal_type": "spring"},
+        {"code": "S2", "score": 90, "signal_type": "spring"},
+        {"code": "E1", "score": 8, "signal_type": "evr"},
+        {"code": "O1", "score": 4, "signal_type": "sos"},
+    ]
+    policy = AShareEntryResearchPolicy(balance_confirmed_signal_families=True)
+
+    ranked = rank_confirmed_items(items, policy)
+    rotated = rank_confirmed_items(items, policy, rotation_key=1)
+
+    assert [item["code"] for item in ranked] == ["O1", "E1", "S1", "S2"]
+    assert [item["code"] for item in rotated] == ["E1", "S1", "O1", "S2"]
+
+
+def test_entry_weight_multiplier_matches_regime_and_signal_and_clamps_value() -> None:
+    policy = AShareEntryResearchPolicy(
+        entry_weight_multipliers=(
+            ("NEUTRAL", "spring", 0.5),
+            ("CAUTION", "sos", 2.0),
+        )
+    )
+
+    assert entry_weight_multiplier(policy, "SPRING", "neutral") == 0.5
+    assert entry_weight_multiplier(policy, "sos", "CAUTION") == 1.0
+    assert entry_weight_multiplier(policy, "evr", "NEUTRAL") == 1.0
