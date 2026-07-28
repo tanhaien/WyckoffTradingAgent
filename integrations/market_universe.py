@@ -16,6 +16,10 @@ def load_hk_symbols() -> tuple[list[str], dict[str, str]]:
     return _load_market_symbols("hk.txt", "hk_meta.json")
 
 
+def load_vn_symbols() -> tuple[list[str], dict[str, str]]:
+    return _load_market_symbols("vn.txt", "vn_meta.json")
+
+
 def _load_market_symbols(symbol_file: str, meta_file: str) -> tuple[list[str], dict[str, str]]:
     base_dir = market_universe_dir(symbol_file, meta_file)
     symbols = _load_symbol_lines(base_dir / symbol_file)

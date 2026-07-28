@@ -21,6 +21,7 @@ import integrations.data_source_efinance
 import integrations.data_source_format
 import integrations.data_source_tickflow
 import integrations.data_source_tushare
+import integrations.data_source_vnstock
 from integrations.index_data_source import fetch_index_akshare as fetch_index_akshare
 from integrations.index_data_source import fetch_index_hist as fetch_index_hist
 from integrations.spot_snapshot import fetch_stock_spot_snapshot as fetch_stock_spot_snapshot
@@ -74,6 +75,7 @@ def _stock_fetchers() -> tuple[StockFetcher, ...]:
         _try_akshare,
         _try_baostock,
         _try_efinance,
+        _try_vnstock,
     )
 
 
@@ -170,6 +172,19 @@ def _record_tickflow_failure(ctx: StockHistFetchContext, exc: Exception) -> None
     )
 
 
+def _try_vnstock(ctx: StockHistFetchContext) -> pd.DataFrame | None:
+    if _env_flag("DATA_SOURCE_DISABLE_VNSTOCK"):
+        ctx.failed_details.append("vnstock=disabled_by_env")
+        return None
+    try:
+        df = integrations.data_source_vnstock.fetch_stock_vnstock(ctx.symbol, ctx.start_s, ctx.end_s, ctx.adjust)
+        return _fallback_output(ctx, df, "vnstock")
+    except Exception as exc:
+        ctx.failed_details.append(f"vnstock={integrations.data_source_format.compact_error(exc)}")
+        _debug_source_fail("vnstock", exc)
+        return None
+
+
 def _fallback_output(ctx: StockHistFetchContext, df: pd.DataFrame, source: str) -> pd.DataFrame:
     out = integrations.data_source_tickflow.attach_tickflow_limit_notices(df, ctx.tickflow_limit_notices)
     out = integrations.data_source_format.tag_source(out, source)
@@ -188,7 +203,7 @@ def _stock_hist_failure(ctx: StockHistFetchContext) -> RuntimeError:
     hint_suffix = _build_datasource_hint(ctx.failed_details)
     return RuntimeError(
         f"数据拉取全线失败 [标:{ctx.symbol}, 范围:{ctx.start_s}..{ctx.end_s}, 复权:{ctx.adjust}]：已按顺序尝试 "
-        f"tickflow→tushare→akshare→baostock→efinance，均无可用 K 线数据。请检查该标的是否已退市或处于长期停牌期。"
+        f"tickflow→tushare→akshare→baostock→efinance→vnstock，均无可用 K 线数据。请检查该标的是否已退市或处于长期停牌期。"
         f"{detail_suffix}{hint_suffix}"
     )
 
